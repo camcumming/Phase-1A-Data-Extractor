@@ -1,0 +1,5 @@
+# Credentials — never commit
+.env
+
+# Extracted data
+extracts/
