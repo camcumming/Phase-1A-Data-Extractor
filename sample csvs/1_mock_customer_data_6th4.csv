@@ -1,0 +1,5 @@
+Customer_ID,Name,Customer_Category,Address_Line_1,Address_Line_2,City,State_Code,Postcode,Country_Code,Email,Delivery_Type
+1917766,Langworth Inc,Water_Billing,100 NORTH PHILIPS AVENUE,,Melbourne,VIC,3180,AU,lrootesk@japanpost.jp,Email
+1957905,Dickinson-Tillman,Water_Billing,ul. M. Kasprzaka 2,,Adelaide Mail Centre,SA,5751,AU,hscuddersl@bloglines.com,Email
+1996877,"Nader, O'Keefe and Weissnat",Water_Billing,Osterstraße 96,,Eastern Suburbs Mc,NSW,2369,AU,rbeckhamm@youtube.com,Email
+1958406,"Wehner, Schroeder and Grant",Water_Billing,Bernstorffsgade 40,,Sydney,NSW,2360,AU,aclearleyn@gmpg.org,Email
