@@ -27,6 +27,7 @@ Extracts all customer records from the Workday **Revenue Management** SOAP API (
    | `WORKDAY_REFRESH_TOKEN` | Refresh token from *Manage Refresh Tokens for Integrations* |
    | `WORKDAY_API_VERSION` | API version (default: `v46.1`) |
    | `PAGE_SIZE` | Records per page, max 999 (default: `999`) |
+   | `MAX_CONCURRENT` | Pages fetched in parallel per batch (default: `5`) |
    | `OUTPUT_DIR` | Output folder relative to the script (default: `extracts`) |
 
 3. Make the script executable (first time only):
@@ -46,10 +47,14 @@ The script prints progress as it runs:
 ```
 Requesting Workday access token...
 Access token obtained.
+Probing total record count...
+Found 11432 customers across 12 page(s).
 Starting extraction → extracts/workday_customers_20260625_143022.csv
-  Fetching page 1 / 12 ... (11432 customers, 12 pages total) wrote 999 rows [running total: 999]
-  Fetching page 2 / 12 ... wrote 999 rows [running total: 1998]
-  ...
+  Fetching pages 1–5 in parallel...
+  Fetching pages 6–10 in parallel...
+  Fetching pages 11–12 in parallel...
+  All pages fetched. Parsing...
+
 Done: 11432 customers written to:
   extracts/workday_customers_20260625_143022.csv
 ```

@@ -38,6 +38,7 @@ done
 
 API_VERSION="${WORKDAY_API_VERSION:-v46.1}"
 PAGE_SIZE="${PAGE_SIZE:-999}"
+MAX_CONCURRENT="${MAX_CONCURRENT:-5}"
 OUTPUT_DIR="$SCRIPT_DIR/${OUTPUT_DIR:-extracts}"
 
 # ── Setup output ──────────────────────────────────────────────────────────────
@@ -46,11 +47,11 @@ mkdir -p "$OUTPUT_DIR"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 OUTPUT_CSV="$OUTPUT_DIR/workday_customers_${TIMESTAMP}.csv"
 
-# ── Temp files (cleaned up on exit) ──────────────────────────────────────────
+# ── Temp directory (cleaned up on exit) ──────────────────────────────────────
 
-TEMP_XML=$(mktemp /tmp/wd_soap_XXXXXX.xml)
+TEMP_DIR=$(mktemp -d /tmp/wd_soap_XXXXXX)
 PARSER_PY=$(mktemp /tmp/wd_parser_XXXXXX.py)
-trap 'rm -f "$TEMP_XML" "$PARSER_PY"' EXIT
+trap 'rm -rf "$TEMP_DIR" "$PARSER_PY"' EXIT
 
 # ── Write Python XML parser ───────────────────────────────────────────────────
 
@@ -216,7 +217,7 @@ PYEOF
 # ── SOAP paged request ────────────────────────────────────────────────────────
 
 fetch_page() {
-    local page="$1"
+    local page="$1" count="${2:-$PAGE_SIZE}"
     curl -s -X POST "$WORKDAY_SOAP_ENDPOINT" \
         -H "Content-Type: text/xml;charset=UTF-8" \
         -H 'SOAPAction: ""' \
@@ -227,7 +228,7 @@ fetch_page() {
     <bsvc:Get_Customers_Request bsvc:version=\"${API_VERSION}\">
       <bsvc:Response_Filter>
         <bsvc:Page>${page}</bsvc:Page>
-        <bsvc:Count>${PAGE_SIZE}</bsvc:Count>
+        <bsvc:Count>${count}</bsvc:Count>
       </bsvc:Response_Filter>
       <bsvc:Response_Group>
         <bsvc:Include_Reference>1</bsvc:Include_Reference>
@@ -240,43 +241,48 @@ fetch_page() {
 </soapenv:Envelope>"
 }
 
-# ── Main extraction loop ──────────────────────────────────────────────────────
+# ── Main extraction ───────────────────────────────────────────────────────────
 
 printf 'Customer_ID,Name,Customer_Category,Address_Line_1,Address_Line_2,City,State_Code,Postcode,Country_Code,Email,Delivery_Type\n' > "$OUTPUT_CSV"
 
-PAGE=1
-TOTAL_PAGES=1
 TOTAL_ROWS=0
 
+# Probe: one record to discover pagination metadata without pulling full data
+echo "Probing total record count..."
+fetch_page 1 1 > "$TEMP_DIR/probe.xml"
+
+TOTAL_RESULTS=$(wd_value "$TEMP_DIR/probe.xml" "Total_Results")
+TOTAL_PAGES=$(wd_value   "$TEMP_DIR/probe.xml" "Total_Pages")
+
+if [[ "$TOTAL_RESULTS" -eq 0 ]]; then
+    echo "No customers found. Exiting."
+    exit 0
+fi
+
+[[ "$TOTAL_PAGES" -lt 1 ]] && TOTAL_PAGES=1
+
+echo "Found ${TOTAL_RESULTS} customers across ${TOTAL_PAGES} page(s)."
 echo "Starting extraction → $OUTPUT_CSV"
 
-while [[ $PAGE -le $TOTAL_PAGES ]]; do
+# Fetch phase: fire up to MAX_CONCURRENT pages in parallel, then wait for the
+# batch before launching the next — each page lands in its own temp file.
+for ((batch_start=1; batch_start<=TOTAL_PAGES; batch_start+=MAX_CONCURRENT)); do
+    batch_end=$((batch_start + MAX_CONCURRENT - 1))
+    [[ $batch_end -gt $TOTAL_PAGES ]] && batch_end=$TOTAL_PAGES
 
-    echo -n "  Fetching page $PAGE / $TOTAL_PAGES ... "
-    fetch_page "$PAGE" > "$TEMP_XML"
+    echo "  Fetching pages ${batch_start}–${batch_end} in parallel..."
+    for ((page=batch_start; page<=batch_end; page++)); do
+        fetch_page "$page" > "$TEMP_DIR/page_$(printf '%04d' $page).xml" &
+    done
+    wait
+done
 
-    # Read pagination metadata from the first page response
-    if [[ $PAGE -eq 1 ]]; then
-        TOTAL_RESULTS=$(wd_value "$TEMP_XML" "Total_Results")
-        TOTAL_PAGES=$(wd_value   "$TEMP_XML" "Total_Pages")
+echo "  All pages fetched. Parsing..."
 
-        if [[ "$TOTAL_RESULTS" -eq 0 ]]; then
-            echo ""
-            echo "No customers found. Exiting."
-            exit 0
-        fi
-
-        # Ensure at least 1 page even if the field is absent
-        [[ "$TOTAL_PAGES" -lt 1 ]] && TOTAL_PAGES=1
-
-        echo -n "(${TOTAL_RESULTS} customers, ${TOTAL_PAGES} pages total) "
-    fi
-
-    ROW_COUNT=$(python3 "$PARSER_PY" "$TEMP_XML" "$OUTPUT_CSV")
+# Parse phase: process pages in order so CSV rows are stable across runs.
+for ((page=1; page<=TOTAL_PAGES; page++)); do
+    ROW_COUNT=$(python3 "$PARSER_PY" "$TEMP_DIR/page_$(printf '%04d' $page).xml" "$OUTPUT_CSV")
     TOTAL_ROWS=$((TOTAL_ROWS + ROW_COUNT))
-    echo "wrote ${ROW_COUNT} rows [running total: ${TOTAL_ROWS}]"
-
-    PAGE=$((PAGE + 1))
 done
 
 echo ""
