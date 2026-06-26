@@ -252,14 +252,15 @@ echo "Probing total record count..."
 fetch_page 1 1 > "$TEMP_DIR/probe.xml"
 
 TOTAL_RESULTS=$(wd_value "$TEMP_DIR/probe.xml" "Total_Results")
-TOTAL_PAGES=$(wd_value   "$TEMP_DIR/probe.xml" "Total_Pages")
 
 if [[ "$TOTAL_RESULTS" -eq 0 ]]; then
     echo "No customers found. Exiting."
     exit 0
 fi
 
-[[ "$TOTAL_PAGES" -lt 1 ]] && TOTAL_PAGES=1
+# Compute pages from our PAGE_SIZE — don't trust Total_Pages from the probe
+# response, which Workday calculates based on the Count=1 we sent.
+TOTAL_PAGES=$(( (TOTAL_RESULTS + PAGE_SIZE - 1) / PAGE_SIZE ))
 
 echo "Found ${TOTAL_RESULTS} customers across ${TOTAL_PAGES} page(s)."
 echo "Starting extraction → $OUTPUT_CSV"
